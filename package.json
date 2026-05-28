@@ -1,0 +1,52 @@
+{
+  "name": "@namraks-labs/plaud-mcp",
+  "version": "0.1.0",
+  "description": "Local MCP server that syncs Plaud Note Pro recordings (AI summaries + diarized transcripts) into markdown files.",
+  "license": "MIT",
+  "author": "Namraks Labs",
+  "type": "module",
+  "homepage": "https://github.com/Namraks-Labs/plaud-mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Namraks-Labs/plaud-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Namraks-Labs/plaud-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "plaud",
+    "transcription",
+    "claude",
+    "ai",
+    "llm",
+    "obsidian",
+    "notes"
+  ],
+  "bin": {
+    "plaud-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.6.0"
+  }
+}
