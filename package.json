@@ -5,6 +5,9 @@
   "license": "MIT",
   "author": "Namraks Labs",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "homepage": "https://github.com/Namraks-Labs/plaud-mcp",
   "repository": {
     "type": "git",
