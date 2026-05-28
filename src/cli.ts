@@ -3,7 +3,7 @@
 // MCP server instead.
 
 import { DEFAULT_API, saveConfig, saveToken } from "./config.js";
-import { getRecording, list, status, sync } from "./core.js";
+import { getRecording, list, status, sync, transcribe } from "./core.js";
 import { decodeTokenExp } from "./jwt.js";
 import { PlaudAuthError, PlaudRateLimitError } from "./plaud.js";
 
@@ -32,6 +32,20 @@ function parseFlag(args: string[], name: string): boolean {
   return false;
 }
 
+function parseStr(args: string[], name: string): string | undefined {
+  const i = args.indexOf(name);
+  if (i >= 0) {
+    const v = args[i + 1];
+    args.splice(i, 2);
+    if (v === undefined) {
+      console.error(`plaud-mcp: ${name} requires a value`);
+      process.exit(1);
+    }
+    return v;
+  }
+  return undefined;
+}
+
 function parseNum(args: string[], name: string): number | undefined {
   const i = args.indexOf(name);
   if (i >= 0) {
@@ -58,6 +72,10 @@ Run with no arguments to start the MCP server (stdio). Subcommands:
   plaud-mcp sync [--force] [--limit N] [--dry-run]
                                  Sync new recordings (incremental by default).
   plaud-mcp list [--limit N]     List recordings on the Plaud cloud.
+  plaud-mcp transcribe <file-id> [--language sv] [--save] [--no-start] [--timeout N]
+                                 Trigger cloud transcription + AI summary for a
+                                 recording, wait, and write the markdown.
+                                 Consumes Plaud transcription quota.
   plaud-mcp get <file-id>        Print a recording's markdown to stdout.
   plaud-mcp status               Show config + last-sync timestamp.
   plaud-mcp help                 Show this help.
@@ -141,6 +159,36 @@ export async function runCli(argv: string[]): Promise<void> {
         console.log(`plaud-mcp: ${r.total} recordings (showing ${r.items.length})`);
         for (const it of r.items)
           console.log(`  ${it.when}  ${it.title || "(untitled)"}  [${it.fileId}]`);
+        return;
+      }
+      case "transcribe": {
+        const fileId = args.shift();
+        if (!fileId) {
+          console.error("plaud-mcp: usage: plaud-mcp transcribe <file-id> [--language sv] [--save] [--no-start]");
+          process.exit(1);
+        }
+        const save = parseFlag(args, "--save");
+        const noStart = parseFlag(args, "--no-start");
+        const language = parseStr(args, "--language") ?? parseStr(args, "--lang");
+        const summType = parseStr(args, "--summ-type");
+        const timeoutSec = parseNum(args, "--timeout");
+        console.log(`plaud-mcp: transcribing ${fileId}${language ? ` (language=${language})` : ""}…`);
+        const r = await transcribe({
+          fileId,
+          language,
+          summType,
+          save,
+          start: !noStart,
+          timeoutMs: timeoutSec ? timeoutSec * 1000 : undefined,
+          onTick: (t, ms) =>
+            console.log(`  …${Math.round(ms / 1000)}s — status ${t.status} (${t.msg})`),
+        });
+        console.log(
+          `plaud-mcp: ${r.msg === "success" || r.status === 1 ? "done" : `status ${r.status}`}: ` +
+            `${r.segments} segment(s)${r.hasSummary ? " + summary" : ""}` +
+            (r.path ? ` → ${r.path}` : "") +
+            (r.savedToCloud ? " (saved to cloud)" : ""),
+        );
         return;
       }
       case "get": {

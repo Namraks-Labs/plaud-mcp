@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { getRecording, list, status, sync } from "./core.js";
+import { getRecording, list, status, sync, transcribe } from "./core.js";
 
 export async function runServer(): Promise<void> {
   const server = new McpServer({ name: "plaud-mcp", version: "0.1.0" });
@@ -83,6 +83,57 @@ export async function runServer(): Promise<void> {
     async ({ fileId }) => {
       const r = await getRecording(fileId);
       return { content: [{ type: "text", text: r.body }] };
+    },
+  );
+
+  server.registerTool(
+    "plaud_transcribe",
+    {
+      title: "Transcribe a Plaud recording",
+      description:
+        "Trigger Plaud's cloud transcription + AI summary generation for a " +
+        "recording that hasn't been processed yet (or re-run it), wait for it " +
+        "to finish, and write the resulting markdown. Consumes Plaud " +
+        "transcription quota. Use plaud_list to find file ids.",
+      inputSchema: {
+        fileId: z.string().min(1).describe("The Plaud file id to transcribe."),
+        language: z
+          .string()
+          .optional()
+          .describe('Language code, e.g. "sv", "en", or "auto" (default) to let Plaud detect.'),
+        summType: z
+          .string()
+          .optional()
+          .describe('Summary template (default "REASONING-NOTE", the web app default).'),
+        save: z
+          .boolean()
+          .optional()
+          .describe("Also persist the result back to the Plaud cloud (default false)."),
+        timeoutSec: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Max seconds to wait for completion (default 600)."),
+      },
+    },
+    async ({ fileId, language, summType, save, timeoutSec }) => {
+      const r = await transcribe({
+        fileId,
+        language,
+        summType,
+        save,
+        timeoutMs: timeoutSec ? timeoutSec * 1000 : undefined,
+      });
+      const text = [
+        `${r.msg === "success" || r.status === 1 ? "done" : `status ${r.status} (${r.msg})`}: [${r.date}] ${r.title}`,
+        `  ${r.segments} transcript segment(s)${r.hasSummary ? " + summary" : " (no summary returned)"}`,
+        r.path ? `  written: ${r.path}` : "  (not written)",
+        r.savedToCloud ? "  saved back to Plaud cloud" : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+      return { content: [{ type: "text", text }, { type: "text", text: JSON.stringify(r) }] };
     },
   );
 

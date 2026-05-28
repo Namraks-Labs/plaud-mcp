@@ -20,8 +20,9 @@ Each recording becomes one markdown file with YAML frontmatter, so it drops stra
 
 ## Features
 
-- **MCP server** — `plaud_sync`, `plaud_list`, `plaud_get_recording`, `plaud_status` tools over stdio.
+- **MCP server** — `plaud_sync`, `plaud_list`, `plaud_get_recording`, `plaud_transcribe`, `plaud_status` tools over stdio.
 - **CLI** — the same operations from the terminal, for first-time auth and scheduled syncs.
+- **Transcribe on demand** — trigger Plaud's cloud transcription + AI summary generation for recordings that haven't been processed yet (not just pull already-processed ones).
 - **Markdown output** — one file per recording: `summary`, `highlights`, and a speaker-diarized `transcript`, with frontmatter (`plaud_file_id`, `title`, `date`, `duration_sec`, `language`).
 - **Idempotent** — matching is by `plaud_file_id` in frontmatter, so re-syncing is safe and renaming files by hand won't create duplicates.
 
@@ -77,9 +78,22 @@ plaud-mcp sync                  # sync new recordings (incremental)
 plaud-mcp sync --dry-run        # show what would sync, write nothing
 plaud-mcp sync --force          # re-sync everything (overwrites by file id)
 plaud-mcp list --limit 20       # list recordings on the cloud
+plaud-mcp transcribe <id>       # trigger cloud transcription + AI summary, wait, write markdown
 plaud-mcp get <file-id>         # print one recording's markdown to stdout
 plaud-mcp status                # show config, token expiry, last-sync timestamp
 ```
+
+### Generating transcriptions
+
+`sync` only pulls recordings Plaud has **already** transcribed. To kick off transcription + AI summary generation for a recording that hasn't been processed yet (or to re-run it), use `transcribe`:
+
+```sh
+plaud-mcp transcribe <file-id> --language sv   # Swedish; use "auto" to let Plaud detect
+plaud-mcp transcribe <file-id> --save          # also persist the result back to the Plaud cloud
+plaud-mcp transcribe <file-id> --no-start      # don't trigger a new job, just fetch/render the current result
+```
+
+This **consumes your Plaud transcription quota** (same as pressing "Transcribe" in the app). It triggers the job, polls until it finishes, then writes the markdown like `sync` does. Under the hood: `PATCH /file/{id}` sets the transcription config, `POST /ai/transsumm/{id}` is polled for the result, and `--save` writes it back via `PATCH /file/{id}`. The summary template defaults to `REASONING-NOTE` (the web app's default).
 
 ## Use with Claude
 
@@ -123,6 +137,7 @@ Tools exposed:
 | `plaud_sync` | Pull new recordings into markdown files. Args: `force`, `limit`, `dryRun`. |
 | `plaud_list` | List recordings on the cloud without syncing. Arg: `limit`. |
 | `plaud_get_recording` | Fetch one recording's rendered markdown by `fileId`, without writing it. |
+| `plaud_transcribe` | Trigger cloud transcription + AI summary for a recording, wait, and write the markdown. Args: `fileId`, `language`, `summType`, `save`, `timeoutSec`. Consumes quota. |
 | `plaud_status` | Show token source/expiry, API domain, notes/state dirs, last sync. |
 
 ## Use with an agent / automation

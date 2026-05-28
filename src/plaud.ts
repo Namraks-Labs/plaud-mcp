@@ -58,6 +58,195 @@ export async function plaudGet<T>(
   return json as T;
 }
 
+/** POST/PATCH a Plaud API path with a JSON body, unwrapping the same envelopes. */
+async function plaudWrite<T>(
+  method: "POST" | "PATCH",
+  path: string,
+  token: string,
+  apiDomain: string,
+  body: Record<string, unknown>,
+): Promise<T> {
+  // Plaud adds a random cache-buster `r` to every mutating request.
+  const payload = { ...body, r: Math.random() };
+  const res = await fetch(`${apiDomain}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "User-Agent": BROWSER_UA,
+      Origin: "https://web.plaud.ai",
+      Referer: "https://web.plaud.ai/",
+      "Content-Type": "application/json",
+      Accept: "application/json, text/plain, */*",
+    },
+    body: JSON.stringify(payload),
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new PlaudAuthError(
+      `Token expired or invalid (HTTP ${res.status}). Re-extract the JWT and run:  plaud-mcp auth <jwt>`,
+    );
+  }
+  if (res.status === 429) {
+    throw new PlaudRateLimitError("Rate limited (HTTP 429). Try again later.");
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status} on ${method} ${path}`);
+  const json = await res.json();
+  // Region-mismatch surfaces as a 200 with a negative status code.
+  if (json && typeof json === "object") {
+    const env = json as Record<string, unknown>;
+    if (env.status === -302 || env.msg === "user region mismatch") {
+      throw new Error(
+        "Plaud API region mismatch — set the correct host with: plaud-mcp api <https://api-…plaud.ai>",
+      );
+    }
+  }
+  return json as T;
+}
+
+export type TranscribeConfig = {
+  /** Language code, e.g. "sv", "en", or "auto" to let Plaud detect. */
+  language: string;
+  /** Summary template. "REASONING-NOTE" is the web app's default. */
+  summType: string;
+  /** Whether to run speaker diarization (1 = on). */
+  diarization: 0 | 1;
+  /** LLM selection; "auto" lets Plaud choose. */
+  llm: string;
+};
+
+export const DEFAULT_TRANSCRIBE_CONFIG: TranscribeConfig = {
+  language: "auto",
+  summType: "REASONING-NOTE",
+  diarization: 1,
+  llm: "auto",
+};
+
+/** Kick off transcription + AI analysis for a recording (sets its tranConfig). */
+export async function startTranscription(
+  fileId: string,
+  token: string,
+  apiDomain: string,
+  cfg: TranscribeConfig,
+): Promise<Record<string, unknown>> {
+  return plaudWrite("PATCH", `/file/${encodeURIComponent(fileId)}`, token, apiDomain, {
+    extra_data: {
+      tranConfig: {
+        language: cfg.language,
+        type_type: "system",
+        type: cfg.summType,
+        diarization: cfg.diarization,
+        llm: cfg.llm,
+      },
+    },
+  });
+}
+
+export type TranssummResult = {
+  complete: boolean;
+  status: number;
+  msg: string;
+  data_result?: unknown;
+  data_result_summ?: unknown;
+  outline_result?: unknown;
+  task_id_info?: unknown;
+  raw: Record<string, unknown>;
+};
+
+/** Poll the analysis status/result for a recording (one call). */
+export async function getTranssumm(
+  fileId: string,
+  token: string,
+  apiDomain: string,
+  cfg: TranscribeConfig,
+): Promise<TranssummResult> {
+  const raw = await plaudWrite<Record<string, unknown>>(
+    "POST",
+    `/ai/transsumm/${encodeURIComponent(fileId)}`,
+    token,
+    apiDomain,
+    {
+      is_reload: 0,
+      summ_type: cfg.summType,
+      summ_type_type: "system",
+      info: JSON.stringify({
+        language: cfg.language,
+        diarization: cfg.diarization,
+        llm: cfg.llm,
+      }),
+      support_mul_summ: true,
+    },
+  );
+  const status = typeof raw.status === "number" ? raw.status : -1;
+  const msg = typeof raw.msg === "string" ? raw.msg : "";
+  const hasResult = Array.isArray(raw.data_result) && raw.data_result.length > 0;
+  const complete = status === 1 || (msg === "success" && hasResult);
+  return {
+    complete,
+    status,
+    msg,
+    data_result: raw.data_result,
+    data_result_summ: raw.data_result_summ,
+    outline_result: raw.outline_result,
+    task_id_info: raw.task_id_info,
+    raw,
+  };
+}
+
+/** Poll until analysis completes (or timeout). Calls onTick after each poll. */
+export async function waitForTranscription(
+  fileId: string,
+  token: string,
+  apiDomain: string,
+  cfg: TranscribeConfig,
+  opts: { timeoutMs?: number; intervalMs?: number; onTick?: (r: TranssummResult, elapsedMs: number) => void } = {},
+): Promise<TranssummResult> {
+  const timeoutMs = opts.timeoutMs ?? 600_000;
+  const intervalMs = opts.intervalMs ?? 10_000;
+  const start = Date.now();
+  let last: TranssummResult | null = null;
+  while (Date.now() - start < timeoutMs) {
+    last = await getTranssumm(fileId, token, apiDomain, cfg);
+    opts.onTick?.(last, Date.now() - start);
+    if (last.complete) return last;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(
+    `Transcription for ${fileId} did not complete within ${Math.round(timeoutMs / 1000)}s` +
+      (last ? ` (last status: ${last.status}, msg: "${last.msg}")` : ""),
+  );
+}
+
+/** Persist analysis results back to the recording on the Plaud cloud. */
+export async function saveTranscription(
+  fileId: string,
+  token: string,
+  apiDomain: string,
+  result: TranssummResult,
+): Promise<Record<string, unknown>> {
+  const raw = result.raw;
+  let aiContent: unknown = raw.data_result_summ ?? "";
+  let aiContentHeader: unknown = {};
+  if (typeof aiContent === "string" && aiContent.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(aiContent) as Record<string, unknown>;
+      aiContent =
+        (parsed.markdown as string) ??
+        ((parsed.content as Record<string, unknown>)?.markdown as string) ??
+        (parsed.summary as string) ??
+        aiContent;
+      aiContentHeader = parsed.header ?? {};
+    } catch {
+      /* leave as-is */
+    }
+  }
+  return plaudWrite("PATCH", `/file/${encodeURIComponent(fileId)}`, token, apiDomain, {
+    trans_result: raw.data_result ?? [],
+    ai_content: aiContent,
+    outline_result: raw.outline_result ?? [],
+    support_mul_summ: true,
+    extra_data: { task_id_info: raw.task_id_info ?? {}, aiContentHeader },
+  });
+}
+
 /** Fetch a signed (pre-authenticated) content URL; returns parsed JSON or raw text. */
 export async function fetchSigned(url: string): Promise<unknown> {
   const res = await fetch(url, {

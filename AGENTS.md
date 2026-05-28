@@ -6,6 +6,8 @@ Operating guide for autonomous agents (and the humans configuring them) working 
 
 Pulls Plaud recordings (summary + highlights + diarized transcript) into one markdown file each, under `PLAUD_NOTES_DIR/YYYY-MM-DD/<slug>-<id6>.md`. Sync is incremental (tracked in `state.json`) and idempotent (matched by `plaud_file_id` in frontmatter).
 
+It can also **trigger** transcription/AI generation for recordings Plaud hasn't processed yet (`plaud-mcp transcribe <id>` / the `plaud_transcribe` tool). This is the one operation with a real cost: it **consumes the user's Plaud transcription quota**, same as pressing "Transcribe" in the app. Treat it as quota-spending and confirm intent before running it in bulk. `sync`, by contrast, only pulls already-processed recordings and is free.
+
 ## Setup contract
 
 1. **Token (required, human-in-the-loop once).** There are no API keys. A human must extract a JWT from a logged-in `web.plaud.ai` session (DevTools → Network → any api request → `authorization: bearer eyJ…`). Provide it to the tool one of two ways:
