@@ -72,10 +72,14 @@ Run with no arguments to start the MCP server (stdio). Subcommands:
   plaud-mcp sync [--force] [--limit N] [--dry-run]
                                  Sync new recordings (incremental by default).
   plaud-mcp list [--limit N]     List recordings on the Plaud cloud.
-  plaud-mcp transcribe <file-id> [--language sv] [--save] [--no-start] [--timeout N]
+  plaud-mcp transcribe <file-id> [--language sv] [--save] [--no-start]
+                                 [--no-summary-wait] [--timeout N]
                                  Trigger cloud transcription + AI summary for a
-                                 recording, wait, and write the markdown.
-                                 Consumes Plaud transcription quota.
+                                 recording, wait, and write the markdown. By
+                                 default waits for the AI summary too (the
+                                 summary task lags the transcript task);
+                                 --no-summary-wait returns as soon as the
+                                 transcript is ready. Consumes Plaud quota.
   plaud-mcp get <file-id>        Print a recording's markdown to stdout.
   plaud-mcp status               Show config + last-sync timestamp.
   plaud-mcp help                 Show this help.
@@ -169,6 +173,7 @@ export async function runCli(argv: string[]): Promise<void> {
         }
         const save = parseFlag(args, "--save");
         const noStart = parseFlag(args, "--no-start");
+        const noSummaryWait = parseFlag(args, "--no-summary-wait");
         const language = parseStr(args, "--language") ?? parseStr(args, "--lang");
         const summType = parseStr(args, "--summ-type");
         const timeoutSec = parseNum(args, "--timeout");
@@ -179,6 +184,7 @@ export async function runCli(argv: string[]): Promise<void> {
           summType,
           save,
           start: !noStart,
+          requireSummary: !noSummaryWait,
           timeoutMs: timeoutSec ? timeoutSec * 1000 : undefined,
           onTick: (t, ms) =>
             console.log(`  …${Math.round(ms / 1000)}s — status ${t.status} (${t.msg})`),

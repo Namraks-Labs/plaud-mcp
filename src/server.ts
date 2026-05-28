@@ -109,6 +109,13 @@ export async function runServer(): Promise<void> {
           .boolean()
           .optional()
           .describe("Also persist the result back to the Plaud cloud (default false)."),
+        waitForSummary: z
+          .boolean()
+          .optional()
+          .describe(
+            "Wait for the AI summary too, not just the transcript (default true). " +
+              "The summary task finishes after the transcript task.",
+          ),
         timeoutSec: z
           .number()
           .int()
@@ -117,12 +124,13 @@ export async function runServer(): Promise<void> {
           .describe("Max seconds to wait for completion (default 600)."),
       },
     },
-    async ({ fileId, language, summType, save, timeoutSec }) => {
+    async ({ fileId, language, summType, save, waitForSummary, timeoutSec }) => {
       const r = await transcribe({
         fileId,
         language,
         summType,
         save,
+        requireSummary: waitForSummary,
         timeoutMs: timeoutSec ? timeoutSec * 1000 : undefined,
       });
       const text = [

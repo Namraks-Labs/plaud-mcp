@@ -251,6 +251,7 @@ export async function transcribe(opts: {
   start?: boolean; // PATCH the tranConfig to kick off a fresh job (default true)
   save?: boolean; // PATCH results back to the cloud (default false)
   write?: boolean; // write a markdown file locally (default true)
+  requireSummary?: boolean; // keep polling until the AI summary lands too (default true)
   timeoutMs?: number;
   onTick?: (r: TranssummResult, elapsedMs: number) => void;
 }): Promise<TranscribeResult> {
@@ -272,6 +273,7 @@ export async function transcribe(opts: {
 
   const result = await waitForTranscription(opts.fileId, token, config.apiDomain, cfg, {
     timeoutMs: opts.timeoutMs,
+    requireSummary: opts.requireSummary,
     onTick: opts.onTick,
   });
 

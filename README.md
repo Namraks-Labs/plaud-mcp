@@ -88,12 +88,15 @@ plaud-mcp status                # show config, token expiry, last-sync timestamp
 `sync` only pulls recordings Plaud has **already** transcribed. To kick off transcription + AI summary generation for a recording that hasn't been processed yet (or to re-run it), use `transcribe`:
 
 ```sh
-plaud-mcp transcribe <file-id> --language sv   # Swedish; use "auto" to let Plaud detect
-plaud-mcp transcribe <file-id> --save          # also persist the result back to the Plaud cloud
-plaud-mcp transcribe <file-id> --no-start      # don't trigger a new job, just fetch/render the current result
+plaud-mcp transcribe <file-id> --language sv      # Swedish; use "auto" to let Plaud detect
+plaud-mcp transcribe <file-id> --save             # also persist the result back to the Plaud cloud
+plaud-mcp transcribe <file-id> --no-start         # don't trigger a new job, just fetch/render the current result
+plaud-mcp transcribe <file-id> --no-summary-wait  # return as soon as the transcript is ready
 ```
 
 This **consumes your Plaud transcription quota** (same as pressing "Transcribe" in the app). It triggers the job, polls until it finishes, then writes the markdown like `sync` does. Under the hood: `PATCH /file/{id}` sets the transcription config, `POST /ai/transsumm/{id}` is polled for the result, and `--save` writes it back via `PATCH /file/{id}`. The summary template defaults to `REASONING-NOTE` (the web app's default).
+
+The **transcript task finishes before the AI summary task**, so by default `transcribe` keeps polling until the summary lands too. Pass `--no-summary-wait` to return as soon as the transcript is ready. Note: without `--save`, the transcript/summary are written to your local markdown file but the Plaud cloud state (what `sync` and the web app read) is unchanged — use `--save` to persist back.
 
 ## Use with Claude
 

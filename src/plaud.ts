@@ -141,7 +141,8 @@ export async function startTranscription(
 }
 
 export type TranssummResult = {
-  complete: boolean;
+  complete: boolean; // transcript is ready
+  summaryReady: boolean; // AI summary is ready
   status: number;
   msg: string;
   data_result?: unknown;
@@ -150,6 +151,13 @@ export type TranssummResult = {
   task_id_info?: unknown;
   raw: Record<string, unknown>;
 };
+
+/** True when data_result_summ carries actual summary content (string or object). */
+function summaryIsReady(v: unknown): boolean {
+  if (typeof v === "string") return v.trim().length > 0;
+  if (v && typeof v === "object") return Object.keys(v as object).length > 0;
+  return false;
+}
 
 /** Poll the analysis status/result for a recording (one call). */
 export async function getTranssumm(
@@ -181,6 +189,7 @@ export async function getTranssumm(
   const complete = status === 1 || (msg === "success" && hasResult);
   return {
     complete,
+    summaryReady: summaryIsReady(raw.data_result_summ),
     status,
     msg,
     data_result: raw.data_result,
@@ -191,24 +200,40 @@ export async function getTranssumm(
   };
 }
 
-/** Poll until analysis completes (or timeout). Calls onTick after each poll. */
+/**
+ * Poll until analysis completes (or timeout). Calls onTick after each poll.
+ *
+ * The transcript task finishes before the AI summary task. When
+ * `requireSummary` is set (the default), we keep polling after the transcript
+ * lands until the summary appears too — but if the overall timeout is hit with
+ * a transcript-but-no-summary, we return that partial result rather than
+ * throwing (some recordings legitimately never get a summary).
+ */
 export async function waitForTranscription(
   fileId: string,
   token: string,
   apiDomain: string,
   cfg: TranscribeConfig,
-  opts: { timeoutMs?: number; intervalMs?: number; onTick?: (r: TranssummResult, elapsedMs: number) => void } = {},
+  opts: {
+    timeoutMs?: number;
+    intervalMs?: number;
+    requireSummary?: boolean;
+    onTick?: (r: TranssummResult, elapsedMs: number) => void;
+  } = {},
 ): Promise<TranssummResult> {
   const timeoutMs = opts.timeoutMs ?? 600_000;
   const intervalMs = opts.intervalMs ?? 10_000;
+  const requireSummary = opts.requireSummary ?? true;
   const start = Date.now();
   let last: TranssummResult | null = null;
   while (Date.now() - start < timeoutMs) {
     last = await getTranssumm(fileId, token, apiDomain, cfg);
     opts.onTick?.(last, Date.now() - start);
-    if (last.complete) return last;
+    if (last.complete && (!requireSummary || last.summaryReady)) return last;
     await new Promise((r) => setTimeout(r, intervalMs));
   }
+  // Timed out. If we at least got a transcript, return that partial result.
+  if (last && last.complete) return last;
   throw new Error(
     `Transcription for ${fileId} did not complete within ${Math.round(timeoutMs / 1000)}s` +
       (last ? ` (last status: ${last.status}, msg: "${last.msg}")` : ""),
