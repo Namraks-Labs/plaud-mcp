@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Example macOS launchd agent for hourly plaud-mcp sync.
+
+  1. Copy to ~/Library/LaunchAgents/com.example.plaud-mcp.plist
+  2. Edit: the path to plaud-mcp (or use an absolute path to node + dist/index.js),
+     the node/PATH for your machine, and the PLAUD_* env vars.
+     If you ran `plaud-mcp auth`, you can omit PLAUD_TOKEN.
+  3. launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.example.plaud-mcp.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.plaud-mcp</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/npx</string>
+        <string>-y</string>
+        <string>@namraks-labs/plaud-mcp</string>
+        <string>sync</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/you/.plaud-mcp/logs/sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/you/.plaud-mcp/logs/sync.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/you</string>
+        <key>PLAUD_NOTES_DIR</key>
+        <string>/Users/you/plaud-notes</string>
+        <key>PLAUD_API_DOMAIN</key>
+        <string>https://api.plaud.ai</string>
+        <key>PLAUD_STATE_DIR</key>
+        <string>/Users/you/.plaud-mcp</string>
+    </dict>
+</dict>
+</plist>

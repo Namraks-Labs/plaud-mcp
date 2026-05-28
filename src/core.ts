@@ -12,10 +12,12 @@ import {
   STATE_DIR,
   loadConfig,
   loadState,
+  loadToken,
   requireToken,
   saveState,
   tokenSource,
 } from "./config.js";
+import { decodeTokenExp } from "./jwt.js";
 import {
   type FileSummary,
   getDetail,
@@ -195,6 +197,7 @@ export async function getRecording(fileId: string): Promise<Rendered> {
 
 export type StatusInfo = {
   tokenSource: "env" | "file" | "none";
+  tokenExpiry: string;
   apiDomain: string;
   notesDir: string;
   stateDir: string;
@@ -205,8 +208,17 @@ export type StatusInfo = {
 export function status(): StatusInfo {
   const state: State = loadState();
   const config: Config = loadConfig();
+  const token = loadToken();
+  let tokenExpiry = "(no token)";
+  if (token) {
+    const info = decodeTokenExp(token);
+    if (!info) tokenExpiry = "(not a decodable JWT)";
+    else if (info.expired) tokenExpiry = `EXPIRED (${new Date(info.expMs).toISOString().slice(0, 10)})`;
+    else tokenExpiry = `${new Date(info.expMs).toISOString().slice(0, 10)} (${info.daysLeft} days left)`;
+  }
   return {
     tokenSource: tokenSource(),
+    tokenExpiry,
     apiDomain: config.apiDomain,
     notesDir: NOTES_DIR,
     stateDir: STATE_DIR,

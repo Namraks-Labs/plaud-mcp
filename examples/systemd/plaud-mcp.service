@@ -1,0 +1,23 @@
+# Example systemd user service for plaud-mcp sync.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp plaud-mcp.service plaud-mcp.timer ~/.config/systemd/user/
+#   # edit the paths/env below, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now plaud-mcp.timer
+#
+# If you ran `plaud-mcp auth`, you can omit PLAUD_TOKEN.
+
+[Unit]
+Description=Sync Plaud recordings into markdown
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PLAUD_API_DOMAIN=https://api.plaud.ai
+Environment=PLAUD_NOTES_DIR=%h/plaud-notes
+Environment=PLAUD_STATE_DIR=%h/.plaud-mcp
+# Environment=PLAUD_TOKEN=eyJ...
+ExecStart=/usr/bin/npx -y @namraks-labs/plaud-mcp sync

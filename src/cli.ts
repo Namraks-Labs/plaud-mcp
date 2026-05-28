@@ -4,7 +4,24 @@
 
 import { DEFAULT_API, saveConfig, saveToken } from "./config.js";
 import { getRecording, list, status, sync } from "./core.js";
+import { decodeTokenExp } from "./jwt.js";
 import { PlaudAuthError, PlaudRateLimitError } from "./plaud.js";
+
+/** Read a token from stdin: drained pipe, or a single prompted line on a TTY. */
+async function readTokenFromStdin(): Promise<string | null> {
+  if (!process.stdin.isTTY) {
+    const chunks: Buffer[] = [];
+    for await (const c of process.stdin) chunks.push(c as Buffer);
+    const s = Buffer.concat(chunks).toString("utf8").trim();
+    return s || null;
+  }
+  process.stderr.write("Paste your Plaud JWT and press Enter:\n");
+  const readline = await import("node:readline");
+  const rl = readline.createInterface({ input: process.stdin });
+  const line = await new Promise<string>((resolve) => rl.once("line", resolve));
+  rl.close();
+  return line.trim() || null;
+}
 
 function parseFlag(args: string[], name: string): boolean {
   const i = args.indexOf(name);
@@ -34,7 +51,9 @@ function help(): void {
 
 Run with no arguments to start the MCP server (stdio). Subcommands:
 
-  plaud-mcp auth <jwt>            Save your Plaud web session token (chmod 600).
+  plaud-mcp auth [jwt]           Save your Plaud token (chmod 600). Omit the
+                                 arg to read it from stdin / a prompt instead,
+                                 e.g.  pbpaste | plaud-mcp auth
   plaud-mcp api <url>            Set API domain (e.g. https://api-euc1.plaud.ai).
   plaud-mcp sync [--force] [--limit N] [--dry-run]
                                  Sync new recordings (incremental by default).
@@ -64,13 +83,26 @@ export async function runCli(argv: string[]): Promise<void> {
   try {
     switch (cmd) {
       case "auth": {
-        const token = args.shift();
+        // Token can be passed as an arg, piped on stdin, or typed at a prompt.
+        // The stdin/prompt paths keep the JWT out of shell history.
+        let token = args.shift();
+        if (!token) token = (await readTokenFromStdin())?.trim();
         if (!token) {
-          console.error("plaud-mcp: usage: plaud-mcp auth <jwt>");
+          console.error(
+            "plaud-mcp: no token provided.\n" +
+              "  plaud-mcp auth <jwt>            (arg)\n" +
+              "  pbpaste | plaud-mcp auth        (stdin — keeps it out of shell history)",
+          );
           process.exit(1);
         }
         const path = saveToken(token);
-        console.log(`plaud-mcp: token saved to ${path} (chmod 600)`);
+        const info = decodeTokenExp(token);
+        const exp = info
+          ? info.expired
+            ? " — but it is already EXPIRED"
+            : ` — expires ${new Date(info.expMs).toISOString().slice(0, 10)} (${info.daysLeft} days)`
+          : "";
+        console.log(`plaud-mcp: token saved to ${path} (chmod 600)${exp}`);
         return;
       }
       case "api": {
@@ -124,6 +156,7 @@ export async function runCli(argv: string[]): Promise<void> {
       case "status": {
         const s = status();
         console.log(`token source: ${s.tokenSource}`);
+        console.log(`token expiry: ${s.tokenExpiry}`);
         console.log(`api domain:   ${s.apiDomain}`);
         console.log(`notes dir:    ${s.notesDir}`);
         console.log(`state dir:    ${s.stateDir}`);

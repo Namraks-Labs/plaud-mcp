@@ -6,6 +6,18 @@ Each recording becomes one markdown file with YAML frontmatter, so it drops stra
 
 > **Note:** Plaud has no official public API. This talks to the same backend the web app at [web.plaud.ai](https://web.plaud.ai) uses, reverse-engineered from observed traffic (the same approach as the [plaud-sync-for-obsidian](https://github.com/leonardsellem/plaud-sync-for-obsidian) plugin). It may break without notice if Plaud changes their backend. Use at your own risk; this project is not affiliated with Plaud.
 
+## Contents
+
+- [Features](#features)
+- [Install](#install)
+- [The sync token](#the-sync-token) — read this first; it's the only fiddly part
+- [Use as a CLI](#use-as-a-cli)
+- [Use with Claude](#use-with-claude) — Claude Code and Claude Desktop
+- [Use with an agent / automation](#use-with-an-agent--automation) — headless, scheduled
+- [Managing it](#managing-it)
+- [Configuration](#configuration)
+- [Output format](#output-format)
+
 ## Features
 
 - **MCP server** — `plaud_sync`, `plaud_list`, `plaud_get_recording`, `plaud_status` tools over stdio.
@@ -16,39 +28,47 @@ Each recording becomes one markdown file with YAML frontmatter, so it drops stra
 ## Install
 
 ```sh
+# one-off, no install
 npx -y @namraks-labs/plaud-mcp --help
-```
 
-Or clone and build:
-
-```sh
+# or clone (npm install runs the build automatically)
 git clone https://github.com/Namraks-Labs/plaud-mcp.git
-cd plaud-mcp
-npm install   # runs the build automatically
+cd plaud-mcp && npm install
 ```
 
-## Authenticate
+## The sync token
 
-Plaud uses a JWT from your logged-in web session.
+Plaud has no API keys. Authentication is a **JWT from your logged-in web session** — this is the only fiddly part of setup, so it's worth doing once, carefully.
+
+**Get the token:**
 
 1. Log in at [web.plaud.ai](https://web.plaud.ai).
 2. Open DevTools → **Network** tab. Filter by your api host (e.g. `api-euc1`). Reload the page.
-3. Click any request → **Headers** → **Request Headers** → copy the value after `authorization: bearer ` (the `eyJ…` part).
-4. Save it:
-   ```sh
-   plaud-mcp auth <jwt>
-   ```
+3. Click any request → **Headers** → **Request Headers** → copy the value after `authorization: bearer ` (the long `eyJ…` string).
 
-The token is a real JWT (decode it at [jwt.io](https://jwt.io) to read its expiry; observed lifetime is ~1 year). When it expires, sync fails with a clear `HTTP 401` and you repeat the steps above.
+**Set the token** — three ways, pick one:
 
-**Region:** if your account is not on the default `https://api.plaud.ai`, set your host once. EU accounts use `api-euc1`:
+```sh
+# 1. Save to a file (chmod 600). Omit the arg to read from stdin and keep it
+#    out of your shell history — recommended:
+pbpaste | plaud-mcp auth            # macOS; or: plaud-mcp auth  (then paste at the prompt)
+plaud-mcp auth eyJ…                 # or pass it directly
+
+# 2. Environment variable (good for MCP client config and CI):
+export PLAUD_TOKEN=eyJ…
+```
+
+The env var wins over the saved file when both are present.
+
+**Region:** if your account is not on the default `https://api.plaud.ai`, set your host once (EU accounts use `api-euc1`):
 
 ```sh
 plaud-mcp api https://api-euc1.plaud.ai
 ```
 
-You can find your host in DevTools → Console:
-`localStorage.getItem("pld_plaud_user_api_domain")`.
+Find your host in DevTools → Console: `localStorage.getItem("pld_plaud_user_api_domain")`.
+
+**Expiry:** the token is a real JWT with an `exp` claim — observed lifetime is ~1 year. `plaud-mcp status` decodes it and tells you how many days are left. When it expires, sync fails with a clear `HTTP 401`; repeat the steps above to refresh it.
 
 ## Use as a CLI
 
@@ -58,12 +78,27 @@ plaud-mcp sync --dry-run        # show what would sync, write nothing
 plaud-mcp sync --force          # re-sync everything (overwrites by file id)
 plaud-mcp list --limit 20       # list recordings on the cloud
 plaud-mcp get <file-id>         # print one recording's markdown to stdout
-plaud-mcp status                # show config + last-sync timestamp
+plaud-mcp status                # show config, token expiry, last-sync timestamp
 ```
 
-## Use as an MCP server
+## Use with Claude
 
-Run with no arguments to start the stdio server. Add it to your MCP client config, e.g. Claude Desktop / Claude Code:
+The server runs over stdio. With no arguments, `plaud-mcp` starts the MCP server.
+
+### Claude Code
+
+```sh
+claude mcp add plaud \
+  -e PLAUD_API_DOMAIN=https://api-euc1.plaud.ai \
+  -e PLAUD_NOTES_DIR=$HOME/plaud-notes \
+  -- npx -y @namraks-labs/plaud-mcp
+```
+
+If you've already run `plaud-mcp auth`, the saved token file is used and you can drop `PLAUD_TOKEN`. Otherwise add `-e PLAUD_TOKEN=eyJ…`.
+
+### Claude Desktop
+
+Add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -88,9 +123,48 @@ Tools exposed:
 | `plaud_sync` | Pull new recordings into markdown files. Args: `force`, `limit`, `dryRun`. |
 | `plaud_list` | List recordings on the cloud without syncing. Arg: `limit`. |
 | `plaud_get_recording` | Fetch one recording's rendered markdown by `fileId`, without writing it. |
-| `plaud_status` | Show token source, API domain, notes/state dirs, last sync. |
+| `plaud_status` | Show token source/expiry, API domain, notes/state dirs, last sync. |
 
-If you authenticated with `plaud-mcp auth`, you can omit `PLAUD_TOKEN` from the env — the server reads the saved token file.
+## Use with an agent / automation
+
+The CLI subcommands are designed to be driven headlessly — by a cron job, a launchd agent, a systemd timer, or an autonomous coding agent. The pattern is always: set the `PLAUD_*` env vars, then call `plaud-mcp sync`.
+
+**Generic headless sync:**
+
+```sh
+PLAUD_TOKEN=eyJ… \
+PLAUD_API_DOMAIN=https://api-euc1.plaud.ai \
+PLAUD_NOTES_DIR=$HOME/plaud-notes \
+  npx -y @namraks-labs/plaud-mcp sync
+```
+
+**cron (every hour):**
+
+```cron
+0 * * * * PLAUD_NOTES_DIR=$HOME/plaud-notes /usr/local/bin/plaud-mcp sync >> $HOME/.plaud-mcp/logs/sync.log 2>&1
+```
+
+**macOS launchd** — a ready-to-edit agent is in [`examples/launchd.plist`](examples/launchd.plist). Copy it to `~/Library/LaunchAgents/`, edit the paths/env, then:
+
+```sh
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.example.plaud-mcp.plist
+launchctl kickstart -p "gui/$(id -u)/com.example.plaud-mcp"   # run once now
+```
+
+**systemd (Linux)** — a `.service` + `.timer` pair is in [`examples/systemd/`](examples/systemd/).
+
+For an autonomous agent, the contract it needs is in [`AGENTS.md`](AGENTS.md): how to authenticate, sync, and diagnose failures without a human in the loop.
+
+## Managing it
+
+```sh
+plaud-mcp status        # token source + days-until-expiry, api domain, last sync, seen count
+```
+
+- **Token expired?** `status` shows `EXPIRED`, and `sync` exits non-zero with an `HTTP 401`. Re-extract the JWT (see [The sync token](#the-sync-token)) and re-run `plaud-mcp auth`.
+- **Rate limited?** `sync` exits with `HTTP 429`. Wait a few minutes and retry.
+- **Re-sync from scratch?** Delete `~/.plaud-mcp/state.json` and run `plaud-mcp sync --force`. Idempotent — existing files are overwritten in place, not duplicated.
+- **Scheduled job went quiet?** Check the job's log. A healthy idle run prints `N total, 0 candidate(s)`. Auth/network failures print a `plaud-mcp: …` line to stderr.
 
 ## Configuration
 
@@ -102,6 +176,12 @@ Environment variables override the saved config files.
 | `PLAUD_API_DOMAIN` | `https://api.plaud.ai` | API host for your region. |
 | `PLAUD_NOTES_DIR` | `~/plaud-notes` | Output directory for markdown files. |
 | `PLAUD_STATE_DIR` | `~/.plaud-mcp` | Where the token, sync state, and config live. |
+
+State files under `PLAUD_STATE_DIR`:
+
+- `token` — JWT, `chmod 600`.
+- `state.json` — `{ lastSyncMs, seenIds[] }` for incremental sync.
+- `config.json` — saved API domain.
 
 ## Output format
 
@@ -130,18 +210,6 @@ source: plaud
 ```
 
 Files are written to `PLAUD_NOTES_DIR/YYYY-MM-DD/<slug>-<id6>.md`, grouped by the recording's start date.
-
-## Scheduling
-
-Run `plaud-mcp sync` on a timer. On macOS, a launchd agent works well; on Linux, a cron job or systemd timer. Set `PLAUD_*` env vars in the job so it finds your token and output dir.
-
-## State
-
-- `~/.plaud-mcp/token` — JWT, `chmod 600`.
-- `~/.plaud-mcp/state.json` — `{ lastSyncMs, seenIds[] }` for incremental sync.
-- `~/.plaud-mcp/config.json` — saved API domain.
-
-Delete `state.json` and run `plaud-mcp sync --force` to fully re-sync.
 
 ## License
 

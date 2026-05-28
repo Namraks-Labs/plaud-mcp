@@ -1,0 +1,12 @@
+# Hourly trigger for plaud-mcp.service. See plaud-mcp.service for install steps.
+
+[Unit]
+Description=Run plaud-mcp sync hourly
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

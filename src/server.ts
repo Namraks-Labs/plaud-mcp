@@ -97,6 +97,7 @@ export async function runServer(): Promise<void> {
       const s = status();
       const text = [
         `token source: ${s.tokenSource}`,
+        `token expiry: ${s.tokenExpiry}`,
         `api domain:   ${s.apiDomain}`,
         `notes dir:    ${s.notesDir}`,
         `state dir:    ${s.stateDir}`,
