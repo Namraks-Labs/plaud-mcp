@@ -51,14 +51,25 @@ export async function runServer(): Promise<void> {
     "plaud_list",
     {
       title: "List Plaud recordings",
-      description: "List recordings on the Plaud cloud without syncing them.",
+      description:
+        "List recordings on the Plaud cloud without syncing them. Optionally " +
+        "filter by local date range and/or title substring.",
       inputSchema: {
-        limit: z.number().int().positive().optional().describe("Max recordings to list (default 20)."),
+        limit: z.number().int().positive().optional().describe("Max recordings to list."),
+        since: z
+          .string()
+          .optional()
+          .describe('Only recordings on/after this local date(time), e.g. "2026-05-26" or "2026-05-26 09:00".'),
+        until: z.string().optional().describe('Only recordings on/before this local date(time).'),
+        titleContains: z.string().optional().describe("Case-insensitive substring match on the recording title."),
       },
     },
-    async ({ limit }) => {
-      const r = await list({ limit: limit ?? 20 });
-      const lines = [`${r.total} recording(s) (showing ${r.items.length}):`];
+    async ({ limit, since, until, titleContains }) => {
+      const filtered = !!(since || until || titleContains);
+      const r = await list({ limit: limit ?? (filtered ? undefined : 20), since, until, titleContains });
+      const lines = [
+        `${r.total} recording(s)${filtered ? `, ${r.matched} matched` : ""} (showing ${r.items.length}):`,
+      ];
       for (const it of r.items) lines.push(`  ${it.when}  ${it.title || "(untitled)"}  [${it.fileId}]`);
       return {
         content: [
@@ -173,10 +184,13 @@ export async function runServer(): Promise<void> {
               "in parallel server-side). Much faster for many/long recordings; pull " +
               "the markdown later with plaud_transcribe (start:false) or plaud_sync.",
           ),
+        since: z.string().optional().describe('Only recordings on/after this local date(time).'),
+        until: z.string().optional().describe('Only recordings on/before this local date(time).'),
+        titleContains: z.string().optional().describe("Only recordings whose title contains this substring."),
       },
     },
-    async ({ language, summType, limit, dryRun, save, triggerOnly }) => {
-      const r = await transcribeAll({ language, summType, limit, dryRun, save, triggerOnly });
+    async ({ language, summType, limit, dryRun, save, triggerOnly, since, until, titleContains }) => {
+      const r = await transcribeAll({ language, summType, limit, dryRun, save, triggerOnly, since, until, titleContains });
       const lines: string[] = [];
       if (r.dryRun) {
         lines.push(`${r.candidates.length} recording(s) would be transcribed:`);

@@ -71,7 +71,11 @@ Run with no arguments to start the MCP server (stdio). Subcommands:
   plaud-mcp api <url>            Set API domain (e.g. https://api-euc1.plaud.ai).
   plaud-mcp sync [--force] [--limit N] [--dry-run]
                                  Sync new recordings (incremental by default).
-  plaud-mcp list [--limit N]     List recordings on the Plaud cloud.
+  plaud-mcp list [--limit N] [--since DATE] [--until DATE] [--on DATE] [--title TXT]
+                                 List recordings on the Plaud cloud. Filter by
+                                 local date range (--since/--until, or --on for
+                                 a single day; "YYYY-MM-DD" or "YYYY-MM-DD HH:MM")
+                                 and/or title substring (--title).
   plaud-mcp transcribe <file-id> [--language sv] [--no-save] [--no-start]
                                  [--no-summary-wait] [--timeout N]
                                  Trigger cloud transcription + AI summary for a
@@ -81,9 +85,11 @@ Run with no arguments to start the MCP server (stdio). Subcommands:
                                  the transcript); --no-summary-wait skips that.
                                  --no-save keeps it local-only. Consumes quota.
   plaud-mcp transcribe-all [--language sv] [--limit N] [--dry-run] [--no-save]
-                           [--trigger-only]
+                           [--trigger-only] [--since DATE] [--until DATE]
+                           [--on DATE] [--title TXT]
                                  Transcribe every recording missing a transcript
-                                 or summary. Use --dry-run first to preview.
+                                 or summary. Scope with the same date/title
+                                 filters as 'list'. Use --dry-run first to preview.
                                  --trigger-only fires all jobs without waiting
                                  (Plaud processes them in parallel; pull later
                                  with 'transcribe <id> --no-start' or 'sync'),
@@ -167,9 +173,19 @@ export async function runCli(argv: string[]): Promise<void> {
         return;
       }
       case "list": {
-        const limit = parseNum(args, "--limit") ?? 20;
-        const r = await list({ limit });
-        console.log(`plaud-mcp: ${r.total} recordings (showing ${r.items.length})`);
+        const on = parseStr(args, "--on");
+        const since = parseStr(args, "--since") ?? on;
+        const until = parseStr(args, "--until") ?? on;
+        const titleContains = parseStr(args, "--title");
+        const filtered = !!(since || until || titleContains);
+        // Default cap of 20 for an unfiltered list; show all matches when filtering.
+        const limit = parseNum(args, "--limit") ?? (filtered ? undefined : 20);
+        const r = await list({ limit, since, until, titleContains });
+        console.log(
+          `plaud-mcp: ${r.total} recordings` +
+            (filtered ? `, ${r.matched} matched filter` : "") +
+            ` (showing ${r.items.length})`,
+        );
         for (const it of r.items)
           console.log(`  ${it.when}  ${it.title || "(untitled)"}  [${it.fileId}]`);
         return;
@@ -215,6 +231,10 @@ export async function runCli(argv: string[]): Promise<void> {
         const language = parseStr(args, "--language") ?? parseStr(args, "--lang");
         const summType = parseStr(args, "--summ-type");
         const limit = parseNum(args, "--limit");
+        const onTa = parseStr(args, "--on");
+        const since = parseStr(args, "--since") ?? onTa;
+        const until = parseStr(args, "--until") ?? onTa;
+        const titleContains = parseStr(args, "--title");
         const r = await transcribeAll({
           language,
           summType,
@@ -222,6 +242,9 @@ export async function runCli(argv: string[]): Promise<void> {
           dryRun,
           save: !noSave,
           triggerOnly,
+          since,
+          until,
+          titleContains,
           onItem: (item, i, total) =>
             console.log(
               `  [${i + 1}/${total}] ${triggerOnly ? "triggering" : "transcribing"} ${item.title} (${item.fileId})…`,

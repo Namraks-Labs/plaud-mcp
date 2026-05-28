@@ -46,6 +46,45 @@ function startMsOf(f: FileSummary): number {
   return st > 1e12 ? st : st * 1000;
 }
 
+function titleOf(f: FileSummary): string {
+  // `filename` is the display name (timestamp for auto-named, or the name set
+  // in the Plaud app); `fullname` is the raw storage filename (e.g. *.ogg).
+  return (
+    (typeof f.filename === "string" && f.filename) ||
+    (typeof f.title === "string" && (f.title as string)) ||
+    (typeof f.name === "string" && (f.name as string)) ||
+    (typeof f.fullname === "string" ? (f.fullname as string) : "")
+  );
+}
+
+export type FileFilter = {
+  /** Local date or datetime, e.g. "2026-05-26" or "2026-05-26 09:00". Inclusive. */
+  since?: string;
+  until?: string;
+  /** Case-insensitive substring match on the recording title/filename. */
+  titleContains?: string;
+};
+
+/** Normalize a filter bound to a fixed-width "YYYY-MM-DD HH:MM" local string. */
+function normBound(s: string, endOfDay: boolean): string {
+  const clean = s.trim().replace("T", " ");
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return `${clean} ${endOfDay ? "23:59" : "00:00"}`;
+  return clean.slice(0, 16).padEnd(16, endOfDay ? "9" : "0");
+}
+
+/** Match a recording against the time-range + title filter, using local time. */
+function matchesFilter(f: FileSummary, filter: FileFilter): boolean {
+  if (filter.titleContains) {
+    if (!titleOf(f).toLowerCase().includes(filter.titleContains.toLowerCase())) return false;
+  }
+  if (filter.since || filter.until) {
+    const local = fmtLocalDateTime(startMsOf(f), getTzOffsetMin(f)); // "YYYY-MM-DD HH:MM"
+    if (filter.since && local < normBound(filter.since, false)) return false;
+    if (filter.until && local > normBound(filter.until, true)) return false;
+  }
+  return true;
+}
+
 /** Walk NOTES_DIR for a file already carrying this plaud_file_id (idempotency). */
 function findExistingFile(fileId: string): string | null {
   if (!existsSync(NOTES_DIR)) return null;
@@ -174,29 +213,26 @@ export async function sync(opts: {
 
 export type ListItem = { fileId: string; when: string; title: string };
 
-export async function list(opts: { limit?: number } = {}): Promise<{
-  total: number;
-  items: ListItem[];
-}> {
+export async function list(
+  opts: { limit?: number } & FileFilter = {},
+): Promise<{ total: number; matched: number; items: ListItem[] }> {
   const token = requireToken();
   const config = loadConfig();
   const all = await listFiles(token, config.apiDomain);
-  const sorted = all
+  const filtered = all
     .filter((f) => !f.is_trash)
-    .sort((a, b) => (b.start_time ?? 0) - (a.start_time ?? 0));
+    .filter((f) => matchesFilter(f, opts));
+  const sorted = filtered.sort((a, b) => (b.start_time ?? 0) - (a.start_time ?? 0));
   const show = opts.limit ? sorted.slice(0, opts.limit) : sorted;
   const items: ListItem[] = show.map((f) => {
     const ms = startMsOf(f);
     return {
       fileId: String(f.file_id ?? f.id),
       when: ms > 0 ? fmtLocalDateTime(ms, getTzOffsetMin(f)) : "?",
-      title:
-        (typeof f.fullname === "string" && f.fullname) ||
-        (typeof f.filename === "string" && f.filename) ||
-        (typeof f.title === "string" ? f.title : typeof f.name === "string" ? f.name : ""),
+      title: titleOf(f),
     };
   });
-  return { total: all.length, items };
+  return { total: all.length, matched: filtered.length, items };
 }
 
 /** Fetch a single recording's rendered markdown without writing it to disk. */
@@ -392,17 +428,18 @@ export async function transcribeAll(opts: {
   save?: boolean;
   triggerOnly?: boolean; // fire each job and return without waiting (Plaud processes in parallel)
   onItem?: (item: TranscribeAllItem, index: number, total: number) => void;
-} = {}): Promise<TranscribeAllResult> {
+} & FileFilter = {}): Promise<TranscribeAllResult> {
   const token = requireToken();
   const config = loadConfig();
   const all = await listFiles(token, config.apiDomain);
 
   const candidates: TranscribeAllItem[] = all
     .filter((f) => !f.is_trash && (!f.is_trans || !f.is_summary))
+    .filter((f) => matchesFilter(f, opts))
     .sort((a, b) => (a.start_time ?? 0) - (b.start_time ?? 0))
     .map((f) => ({
       fileId: String(f.file_id ?? f.id),
-      title: (f.fullname || f.filename || String(f.file_id ?? f.id)) as string,
+      title: titleOf(f) || String(f.file_id ?? f.id),
       needsTranscript: !f.is_trans,
       needsSummary: !f.is_summary,
     }));

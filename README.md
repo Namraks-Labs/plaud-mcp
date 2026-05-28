@@ -78,6 +78,8 @@ plaud-mcp sync                  # sync new recordings (incremental)
 plaud-mcp sync --dry-run        # show what would sync, write nothing
 plaud-mcp sync --force          # re-sync everything (overwrites by file id)
 plaud-mcp list --limit 20       # list recordings on the cloud
+plaud-mcp list --on 2026-05-26  # filter by local date (or --since/--until a range)
+plaud-mcp list --title "standup" # filter by recording name (substring, case-insensitive)
 plaud-mcp transcribe <id>       # trigger cloud transcription + AI summary, wait, write markdown
 plaud-mcp transcribe-all        # transcribe every recording missing a transcript/summary
 plaud-mcp get <file-id>         # print one recording's markdown to stdout
@@ -108,6 +110,20 @@ plaud-mcp transcribe-all --limit 5    # cap how many run
 ```
 
 `transcribe-all` targets every recording missing a transcript **or** a summary (detected via the `is_trans` / `is_summary` flags on the file list).
+
+### Filtering (list & transcribe-all)
+
+Both `list` and `transcribe-all` accept the same filters, so you can scope to a time window and/or a recording name:
+
+```sh
+plaud-mcp list --since 2026-05-26 --until 2026-05-27   # local date range (inclusive)
+plaud-mcp list --on 2026-05-26                         # shorthand for a single day
+plaud-mcp list --title "weekly sync"                   # name substring, case-insensitive
+plaud-mcp transcribe-all --on 2026-05-26 --trigger-only   # transcribe only that day's recordings
+```
+
+- **Dates are local** (the recording's own timezone) and accept `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. `--since`/`--until` are inclusive; `--on` is a shorthand for both.
+- **`--title`** matches the recording's name as stored by Plaud (the in-app name, or the auto-assigned timestamp for un-named recordings). Note the list does not carry the AI-generated title — that lives in each recording's markdown, so grep the vault to search by generated title.
 
 ## Use with Claude
 
@@ -149,10 +165,10 @@ Tools exposed:
 | Tool | Description |
 | --- | --- |
 | `plaud_sync` | Pull new recordings into markdown files. Args: `force`, `limit`, `dryRun`. |
-| `plaud_list` | List recordings on the cloud without syncing. Arg: `limit`. |
+| `plaud_list` | List recordings on the cloud without syncing. Args: `limit`, `since`, `until`, `titleContains`. |
 | `plaud_get_recording` | Fetch one recording's rendered markdown by `fileId`, without writing it. |
 | `plaud_transcribe` | Trigger cloud transcription + AI summary for a recording, wait, write the markdown, and save back to the cloud. Args: `fileId`, `language`, `summType`, `save`, `waitForSummary`, `timeoutSec`. Consumes quota. |
-| `plaud_transcribe_all` | Transcribe every recording missing a transcript/summary. Args: `language`, `summType`, `limit`, `dryRun`, `save`. Consumes quota per recording — use `dryRun` first. |
+| `plaud_transcribe_all` | Transcribe every recording missing a transcript/summary. Args: `language`, `summType`, `limit`, `dryRun`, `save`, `triggerOnly`, `since`, `until`, `titleContains`. Consumes quota per recording — use `dryRun` first. |
 | `plaud_status` | Show token source/expiry, API domain, notes/state dirs, last sync. |
 
 ## Use with an agent / automation
