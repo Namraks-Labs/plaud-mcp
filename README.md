@@ -1,5 +1,8 @@
 # plaud-mcp
 
+[![npm](https://img.shields.io/npm/v/@namraks-labs/plaud-mcp?logo=npm)](https://www.npmjs.com/package/@namraks-labs/plaud-mcp)
+[![license](https://img.shields.io/npm/l/@namraks-labs/plaud-mcp)](LICENSE)
+
 A local [Model Context Protocol](https://modelcontextprotocol.io) server that syncs your [Plaud](https://www.plaud.ai) Note Pro / NotePin recordings — AI summaries, highlights, and diarized transcripts — into plain markdown files on your machine, and exposes them to MCP clients like Claude.
 
 Each recording becomes one markdown file with YAML frontmatter, so it drops straight into Obsidian, a notes folder, or any tool that reads markdown. Sync is incremental and idempotent.
