@@ -124,23 +124,30 @@ export const DEFAULT_TRANSCRIBE_CONFIG: TranscribeConfig = {
   llm: "auto",
 };
 
-/** Kick off transcription + AI analysis for a recording (sets its tranConfig). */
+/**
+ * Kick off transcription + AI analysis for a recording.
+ *
+ * The actual trigger is POST /ai/transsumm/{id} with `is_reload: 1` (verified
+ * against a live account: it flips ppc_status/is_trans and starts the job).
+ * `is_reload: 0` — what the polling path uses — is a read-only status check and
+ * does NOT start anything.
+ */
 export async function startTranscription(
   fileId: string,
   token: string,
   apiDomain: string,
   cfg: TranscribeConfig,
 ): Promise<Record<string, unknown>> {
-  return plaudWrite("PATCH", `/file/${encodeURIComponent(fileId)}`, token, apiDomain, {
-    extra_data: {
-      tranConfig: {
-        language: cfg.language,
-        type_type: "system",
-        type: cfg.summType,
-        diarization: cfg.diarization,
-        llm: cfg.llm,
-      },
-    },
+  return plaudWrite("POST", `/ai/transsumm/${encodeURIComponent(fileId)}`, token, apiDomain, {
+    is_reload: 1,
+    summ_type: cfg.summType,
+    summ_type_type: "system",
+    info: JSON.stringify({
+      language: cfg.language,
+      diarization: cfg.diarization,
+      llm: cfg.llm,
+    }),
+    support_mul_summ: true,
   });
 }
 
@@ -189,8 +196,11 @@ export async function getTranssumm(
   );
   const status = typeof raw.status === "number" ? raw.status : -1;
   const msg = typeof raw.msg === "string" ? raw.msg : "";
+  // The transcript is ready once data_result is a populated array. `status`
+  // stays 0 while the transcript is ready but the summary is still generating,
+  // and only flips to 1 once the summary lands — so don't gate completion on it.
   const hasResult = Array.isArray(raw.data_result) && raw.data_result.length > 0;
-  const complete = status === 1 || (msg === "success" && hasResult);
+  const complete = hasResult;
   return {
     complete,
     summaryReady: summaryIsReady(raw.data_result_summ),
