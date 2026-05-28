@@ -249,7 +249,7 @@ export async function transcribe(opts: {
   summType?: string;
   diarization?: 0 | 1;
   start?: boolean; // PATCH the tranConfig to kick off a fresh job (default true)
-  save?: boolean; // PATCH results back to the cloud (default false)
+  save?: boolean; // PATCH results back to the cloud (default true)
   write?: boolean; // write a markdown file locally (default true)
   requireSummary?: boolean; // keep polling until the AI summary lands too (default true)
   timeoutMs?: number;
@@ -295,7 +295,7 @@ export async function transcribe(opts: {
   }
 
   let savedToCloud = false;
-  if (opts.save) {
+  if (opts.save !== false) {
     await saveTranscription(opts.fileId, token, config.apiDomain, result);
     savedToCloud = true;
   }
@@ -311,6 +311,74 @@ export async function transcribe(opts: {
     path,
     savedToCloud,
   };
+}
+
+export type TranscribeAllItem = {
+  fileId: string;
+  title: string;
+  needsTranscript: boolean;
+  needsSummary: boolean;
+};
+
+export type TranscribeAllResult = {
+  candidates: TranscribeAllItem[];
+  processed: TranscribeResult[];
+  failures: { fileId: string; title: string; error: string }[];
+  dryRun: boolean;
+};
+
+/**
+ * Find every recording that isn't fully processed (missing a transcript or a
+ * summary) and transcribe each. Consumes Plaud quota per recording — use
+ * dryRun to preview, and limit to cap how many run.
+ */
+export async function transcribeAll(opts: {
+  language?: string;
+  summType?: string;
+  limit?: number;
+  dryRun?: boolean;
+  save?: boolean;
+  onItem?: (item: TranscribeAllItem, index: number, total: number) => void;
+} = {}): Promise<TranscribeAllResult> {
+  const token = requireToken();
+  const config = loadConfig();
+  const all = await listFiles(token, config.apiDomain);
+
+  const candidates: TranscribeAllItem[] = all
+    .filter((f) => !f.is_trash && (!f.is_trans || !f.is_summary))
+    .sort((a, b) => (a.start_time ?? 0) - (b.start_time ?? 0))
+    .map((f) => ({
+      fileId: String(f.file_id ?? f.id),
+      title: (f.fullname || f.filename || String(f.file_id ?? f.id)) as string,
+      needsTranscript: !f.is_trans,
+      needsSummary: !f.is_summary,
+    }));
+
+  const todo = opts.limit ? candidates.slice(0, opts.limit) : candidates;
+  const result: TranscribeAllResult = {
+    candidates: todo,
+    processed: [],
+    failures: [],
+    dryRun: !!opts.dryRun,
+  };
+  if (opts.dryRun) return result;
+
+  let i = 0;
+  for (const item of todo) {
+    opts.onItem?.(item, i++, todo.length);
+    try {
+      const r = await transcribe({
+        fileId: item.fileId,
+        language: opts.language,
+        summType: opts.summType,
+        save: opts.save,
+      });
+      result.processed.push(r);
+    } catch (e) {
+      result.failures.push({ fileId: item.fileId, title: item.title, error: (e as Error).message });
+    }
+  }
+  return result;
 }
 
 export type StatusInfo = {

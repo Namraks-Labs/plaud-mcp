@@ -79,6 +79,7 @@ plaud-mcp sync --dry-run        # show what would sync, write nothing
 plaud-mcp sync --force          # re-sync everything (overwrites by file id)
 plaud-mcp list --limit 20       # list recordings on the cloud
 plaud-mcp transcribe <id>       # trigger cloud transcription + AI summary, wait, write markdown
+plaud-mcp transcribe-all        # transcribe every recording missing a transcript/summary
 plaud-mcp get <file-id>         # print one recording's markdown to stdout
 plaud-mcp status                # show config, token expiry, last-sync timestamp
 ```
@@ -96,7 +97,17 @@ plaud-mcp transcribe <file-id> --no-summary-wait  # return as soon as the transc
 
 This **consumes your Plaud transcription quota** (same as pressing "Transcribe" in the app). It triggers the job, polls until it finishes, then writes the markdown like `sync` does. Under the hood: `PATCH /file/{id}` sets the transcription config, `POST /ai/transsumm/{id}` is polled for the result, and `--save` writes it back via `PATCH /file/{id}`. The summary template defaults to `REASONING-NOTE` (the web app's default).
 
-The **transcript task finishes before the AI summary task**, so by default `transcribe` keeps polling until the summary lands too. Pass `--no-summary-wait` to return as soon as the transcript is ready. Note: without `--save`, the transcript/summary are written to your local markdown file but the Plaud cloud state (what `sync` and the web app read) is unchanged — use `--save` to persist back.
+The **transcript task finishes before the AI summary task**, so by default `transcribe` keeps polling until the summary lands too. Pass `--no-summary-wait` to return as soon as the transcript is ready. By default the result is also **saved back to the Plaud cloud** (so the web app and `sync` see it); pass `--no-save` to keep it local-only.
+
+To process everything that hasn't been transcribed yet in one go:
+
+```sh
+plaud-mcp transcribe-all --dry-run    # preview which recordings would be processed
+plaud-mcp transcribe-all              # transcribe all of them (consumes quota per recording)
+plaud-mcp transcribe-all --limit 5    # cap how many run
+```
+
+`transcribe-all` targets every recording missing a transcript **or** a summary (detected via the `is_trans` / `is_summary` flags on the file list).
 
 ## Use with Claude
 
@@ -140,7 +151,8 @@ Tools exposed:
 | `plaud_sync` | Pull new recordings into markdown files. Args: `force`, `limit`, `dryRun`. |
 | `plaud_list` | List recordings on the cloud without syncing. Arg: `limit`. |
 | `plaud_get_recording` | Fetch one recording's rendered markdown by `fileId`, without writing it. |
-| `plaud_transcribe` | Trigger cloud transcription + AI summary for a recording, wait, and write the markdown. Args: `fileId`, `language`, `summType`, `save`, `timeoutSec`. Consumes quota. |
+| `plaud_transcribe` | Trigger cloud transcription + AI summary for a recording, wait, write the markdown, and save back to the cloud. Args: `fileId`, `language`, `summType`, `save`, `waitForSummary`, `timeoutSec`. Consumes quota. |
+| `plaud_transcribe_all` | Transcribe every recording missing a transcript/summary. Args: `language`, `summType`, `limit`, `dryRun`, `save`. Consumes quota per recording — use `dryRun` first. |
 | `plaud_status` | Show token source/expiry, API domain, notes/state dirs, last sync. |
 
 ## Use with an agent / automation

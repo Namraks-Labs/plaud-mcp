@@ -18,7 +18,11 @@ export type FileSummary = {
   id: string;
   file_id?: string;
   is_trash?: boolean;
+  is_trans?: boolean; // transcript has been generated
+  is_summary?: boolean; // AI summary has been generated
   start_time?: number;
+  filename?: string;
+  fullname?: string;
   [k: string]: unknown;
 };
 

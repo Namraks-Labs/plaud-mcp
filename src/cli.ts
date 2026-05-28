@@ -3,7 +3,7 @@
 // MCP server instead.
 
 import { DEFAULT_API, saveConfig, saveToken } from "./config.js";
-import { getRecording, list, status, sync, transcribe } from "./core.js";
+import { getRecording, list, status, sync, transcribe, transcribeAll } from "./core.js";
 import { decodeTokenExp } from "./jwt.js";
 import { PlaudAuthError, PlaudRateLimitError } from "./plaud.js";
 
@@ -72,14 +72,18 @@ Run with no arguments to start the MCP server (stdio). Subcommands:
   plaud-mcp sync [--force] [--limit N] [--dry-run]
                                  Sync new recordings (incremental by default).
   plaud-mcp list [--limit N]     List recordings on the Plaud cloud.
-  plaud-mcp transcribe <file-id> [--language sv] [--save] [--no-start]
+  plaud-mcp transcribe <file-id> [--language sv] [--no-save] [--no-start]
                                  [--no-summary-wait] [--timeout N]
                                  Trigger cloud transcription + AI summary for a
-                                 recording, wait, and write the markdown. By
-                                 default waits for the AI summary too (the
-                                 summary task lags the transcript task);
-                                 --no-summary-wait returns as soon as the
-                                 transcript is ready. Consumes Plaud quota.
+                                 recording, wait, write the markdown, and (by
+                                 default) save the result back to the Plaud
+                                 cloud. Waits for the AI summary too (it lags
+                                 the transcript); --no-summary-wait skips that.
+                                 --no-save keeps it local-only. Consumes quota.
+  plaud-mcp transcribe-all [--language sv] [--limit N] [--dry-run] [--no-save]
+                                 Transcribe every recording missing a transcript
+                                 or summary. Use --dry-run first to preview.
+                                 Consumes Plaud quota per recording.
   plaud-mcp get <file-id>        Print a recording's markdown to stdout.
   plaud-mcp status               Show config + last-sync timestamp.
   plaud-mcp help                 Show this help.
@@ -171,7 +175,8 @@ export async function runCli(argv: string[]): Promise<void> {
           console.error("plaud-mcp: usage: plaud-mcp transcribe <file-id> [--language sv] [--save] [--no-start]");
           process.exit(1);
         }
-        const save = parseFlag(args, "--save");
+        parseFlag(args, "--save"); // accepted but now the default; consume it
+        const noSave = parseFlag(args, "--no-save");
         const noStart = parseFlag(args, "--no-start");
         const noSummaryWait = parseFlag(args, "--no-summary-wait");
         const language = parseStr(args, "--language") ?? parseStr(args, "--lang");
@@ -182,7 +187,7 @@ export async function runCli(argv: string[]): Promise<void> {
           fileId,
           language,
           summType,
-          save,
+          save: !noSave,
           start: !noStart,
           requireSummary: !noSummaryWait,
           timeoutMs: timeoutSec ? timeoutSec * 1000 : undefined,
@@ -195,6 +200,37 @@ export async function runCli(argv: string[]): Promise<void> {
             (r.path ? ` → ${r.path}` : "") +
             (r.savedToCloud ? " (saved to cloud)" : ""),
         );
+        return;
+      }
+      case "transcribe-all": {
+        const dryRun = parseFlag(args, "--dry-run");
+        const noSave = parseFlag(args, "--no-save");
+        parseFlag(args, "--save");
+        const language = parseStr(args, "--language") ?? parseStr(args, "--lang");
+        const summType = parseStr(args, "--summ-type");
+        const limit = parseNum(args, "--limit");
+        const r = await transcribeAll({
+          language,
+          summType,
+          limit,
+          dryRun,
+          save: !noSave,
+          onItem: (item, i, total) =>
+            console.log(`  [${i + 1}/${total}] transcribing ${item.title} (${item.fileId})…`),
+        });
+        if (r.dryRun) {
+          console.log(`plaud-mcp: ${r.candidates.length} recording(s) would be transcribed:`);
+          for (const c of r.candidates)
+            console.log(
+              `  ${c.title}  [${c.fileId}]  needs${c.needsTranscript ? " transcript" : ""}${c.needsSummary ? " summary" : ""}`,
+            );
+          console.log("Run without --dry-run to process them (consumes Plaud quota).");
+        } else {
+          console.log(`plaud-mcp: processed ${r.processed.length}/${r.candidates.length}.`);
+          for (const p of r.processed)
+            console.log(`  ${p.path ?? p.fileId} — ${p.segments} segment(s)${p.hasSummary ? " + summary" : ""}`);
+          for (const f of r.failures) console.error(`  failed ${f.title} [${f.fileId}]: ${f.error}`);
+        }
         return;
       }
       case "get": {

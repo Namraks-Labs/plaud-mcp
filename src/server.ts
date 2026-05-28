@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 
-import { getRecording, list, status, sync, transcribe } from "./core.js";
+import { getRecording, list, status, sync, transcribe, transcribeAll } from "./core.js";
 
 export async function runServer(): Promise<void> {
   const server = new McpServer({ name: "plaud-mcp", version: "0.1.0" });
@@ -108,7 +108,7 @@ export async function runServer(): Promise<void> {
         save: z
           .boolean()
           .optional()
-          .describe("Also persist the result back to the Plaud cloud (default false)."),
+          .describe("Persist the result back to the Plaud cloud (default true; set false to keep it local-only)."),
         waitForSummary: z
           .boolean()
           .optional()
@@ -142,6 +142,48 @@ export async function runServer(): Promise<void> {
         .filter(Boolean)
         .join("\n");
       return { content: [{ type: "text", text }, { type: "text", text: JSON.stringify(r) }] };
+    },
+  );
+
+  server.registerTool(
+    "plaud_transcribe_all",
+    {
+      title: "Transcribe all unprocessed recordings",
+      description:
+        "Find every recording that isn't fully processed (missing a transcript " +
+        "or AI summary) and transcribe each. Consumes Plaud quota per recording " +
+        "— call with dryRun:true first to preview, and use limit to cap how many run.",
+      inputSchema: {
+        language: z.string().optional().describe('Language code (default "auto").'),
+        summType: z.string().optional().describe('Summary template (default "REASONING-NOTE").'),
+        limit: z.number().int().positive().optional().describe("Max recordings to process."),
+        dryRun: z
+          .boolean()
+          .optional()
+          .describe("List the recordings that would be transcribed without doing it."),
+        save: z
+          .boolean()
+          .optional()
+          .describe("Persist results back to the Plaud cloud (default true)."),
+      },
+    },
+    async ({ language, summType, limit, dryRun, save }) => {
+      const r = await transcribeAll({ language, summType, limit, dryRun, save });
+      const lines: string[] = [];
+      if (r.dryRun) {
+        lines.push(`${r.candidates.length} recording(s) would be transcribed:`);
+        for (const c of r.candidates)
+          lines.push(
+            `  ${c.title}  [${c.fileId}]` +
+              ` — needs${c.needsTranscript ? " transcript" : ""}${c.needsSummary ? " summary" : ""}`,
+          );
+      } else {
+        lines.push(`Processed ${r.processed.length}/${r.candidates.length} recording(s):`);
+        for (const p of r.processed)
+          lines.push(`  [${p.date}] ${p.title} — ${p.segments} segment(s)${p.hasSummary ? " + summary" : ""}`);
+        for (const f of r.failures) lines.push(`  failed ${f.title} [${f.fileId}]: ${f.error}`);
+      }
+      return { content: [{ type: "text", text: lines.join("\n") }, { type: "text", text: JSON.stringify(r) }] };
     },
   );
 
