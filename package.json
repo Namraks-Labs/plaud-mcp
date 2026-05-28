@@ -1,6 +1,6 @@
 {
   "name": "@namraks-labs/plaud-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local MCP server that syncs Plaud Note Pro recordings (AI summaries + diarized transcripts) into markdown files.",
   "license": "MIT",
   "author": "Namraks Labs",
