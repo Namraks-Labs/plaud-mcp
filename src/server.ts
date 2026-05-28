@@ -181,6 +181,7 @@ export async function runServer(): Promise<void> {
         lines.push(`Processed ${r.processed.length}/${r.candidates.length} recording(s):`);
         for (const p of r.processed)
           lines.push(`  [${p.date}] ${p.title} — ${p.segments} segment(s)${p.hasSummary ? " + summary" : ""}`);
+        for (const s of r.skipped) lines.push(`  skipped ${s.title} [${s.fileId}]: ${s.reason}`);
         for (const f of r.failures) lines.push(`  failed ${f.title} [${f.fileId}]: ${f.error}`);
       }
       return { content: [{ type: "text", text: lines.join("\n") }, { type: "text", text: JSON.stringify(r) }] };

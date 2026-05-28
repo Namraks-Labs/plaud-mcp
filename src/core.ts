@@ -34,7 +34,8 @@ import {
   type Rendered,
   extractSummary,
   extractTranscript,
-  fmtDate,
+  fmtLocalDateTime,
+  getTzOffsetMin,
   renderMarkdown,
 } from "./render.js";
 
@@ -138,6 +139,9 @@ export async function sync(opts: {
     try {
       const detailRaw = await getDetail(id, token, config.apiDomain);
       const detail = await hydrateDetail(detailRaw, extractors);
+      // timezone/zonemins are only on the list entry, not the detail.
+      detail.timezone = f.timezone;
+      detail.zonemins = f.zonemins;
       const rendered: Rendered = renderMarkdown(detail);
 
       const existing = findExistingFile(rendered.fileId);
@@ -148,7 +152,7 @@ export async function sync(opts: {
       result.synced.push({
         fileId: rendered.fileId,
         title: rendered.title,
-        date: fmtDate(rendered.startMs),
+        date: rendered.date,
         action: existing ? "updated" : "created",
         path,
         summary: rendered.summary,
@@ -185,8 +189,11 @@ export async function list(opts: { limit?: number } = {}): Promise<{
     const ms = startMsOf(f);
     return {
       fileId: String(f.file_id ?? f.id),
-      when: ms > 0 ? new Date(ms).toISOString().slice(0, 16).replace("T", " ") : "?",
-      title: typeof f.title === "string" ? f.title : typeof f.name === "string" ? f.name : "",
+      when: ms > 0 ? fmtLocalDateTime(ms, getTzOffsetMin(f)) : "?",
+      title:
+        (typeof f.fullname === "string" && f.fullname) ||
+        (typeof f.filename === "string" && f.filename) ||
+        (typeof f.title === "string" ? f.title : typeof f.name === "string" ? f.name : ""),
     };
   });
   return { total: all.length, items };
@@ -264,8 +271,16 @@ export async function transcribe(opts: {
     ...(opts.diarization !== undefined ? { diarization: opts.diarization } : {}),
   };
 
-  // Metadata (title/date/duration) comes from the file detail.
+  // Metadata (title/date/duration) comes from the file detail, but the local
+  // timezone (timezone/zonemins) is only on the list entry — fetch both.
   const detail = await getDetail(opts.fileId, token, config.apiDomain);
+  const listItem = (await listFiles(token, config.apiDomain)).find(
+    (f) => String(f.file_id ?? f.id) === opts.fileId,
+  );
+  if (listItem) {
+    detail.timezone = listItem.timezone;
+    detail.zonemins = listItem.zonemins;
+  }
 
   if (opts.start !== false) {
     await startTranscription(opts.fileId, token, config.apiDomain, cfg);
@@ -303,7 +318,7 @@ export async function transcribe(opts: {
   return {
     fileId: rendered.fileId,
     title: rendered.title,
-    date: fmtDate(rendered.startMs),
+    date: rendered.date,
     status: result.status,
     msg: result.msg,
     segments: Array.isArray(result.data_result) ? result.data_result.length : 0,
@@ -324,6 +339,7 @@ export type TranscribeAllResult = {
   candidates: TranscribeAllItem[];
   processed: TranscribeResult[];
   failures: { fileId: string; title: string; error: string }[];
+  skipped: { fileId: string; title: string; reason: string }[];
   dryRun: boolean;
 };
 
@@ -359,12 +375,27 @@ export async function transcribeAll(opts: {
     candidates: todo,
     processed: [],
     failures: [],
+    skipped: [],
     dryRun: !!opts.dryRun,
   };
   if (opts.dryRun) return result;
 
   let i = 0;
   for (const item of todo) {
+    // Re-check freshness right before processing: a long batch can race with
+    // another session (or the recording may have completed since we listed),
+    // and re-triggering an already-done file would force a wasteful regen.
+    try {
+      const current = (await listFiles(token, config.apiDomain)).find(
+        (f) => String(f.file_id ?? f.id) === item.fileId,
+      );
+      if (current && current.is_trans && current.is_summary) {
+        result.skipped.push({ fileId: item.fileId, title: item.title, reason: "already transcribed" });
+        continue;
+      }
+    } catch {
+      /* if the freshness check fails, fall through and attempt anyway */
+    }
     opts.onItem?.(item, i++, todo.length);
     try {
       const r = await transcribe({

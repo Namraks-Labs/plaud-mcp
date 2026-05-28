@@ -229,6 +229,7 @@ export async function runCli(argv: string[]): Promise<void> {
           console.log(`plaud-mcp: processed ${r.processed.length}/${r.candidates.length}.`);
           for (const p of r.processed)
             console.log(`  ${p.path ?? p.fileId} — ${p.segments} segment(s)${p.hasSummary ? " + summary" : ""}`);
+          for (const s of r.skipped) console.log(`  skipped ${s.title} [${s.fileId}]: ${s.reason}`);
           for (const f of r.failures) console.error(`  failed ${f.title} [${f.fileId}]: ${f.error}`);
         }
         return;
