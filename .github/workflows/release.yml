@@ -1,9 +1,9 @@
 name: Release
 
-# Publishes the package to npm when a GitHub Release is published.
-# Requires a repo secret NPM_TOKEN: an npm granular access token with
-# read/write to @namraks-labs/plaud-mcp (or the @namraks-labs scope) and
-# "bypass 2FA" enabled (automation token).
+# Publishes to npm when a GitHub Release is published, using npm Trusted
+# Publishing (OIDC) — no tokens/secrets. Requires a one-time setup on npm:
+# configure a Trusted Publisher for @namraks-labs/plaud-mcp pointing at this
+# repo (Namraks-Labs/plaud-mcp) and workflow file (release.yml).
 on:
   release:
     types: [published]
@@ -11,7 +11,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write # enables npm publish provenance via OIDC
+  id-token: write # required for OIDC trusted publishing + provenance
 
 jobs:
   publish:
@@ -24,11 +24,12 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
+      # Trusted Publishing / OIDC requires npm >= 11.5.1.
+      - run: npm install -g npm@latest
+
       - run: npm ci
 
       - run: npm run build
 
-      # --provenance attaches a signed build-provenance attestation (OIDC).
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # No NODE_AUTH_TOKEN: auth + provenance come from the OIDC identity.
+      - run: npm publish --access public
