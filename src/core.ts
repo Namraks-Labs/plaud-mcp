@@ -255,9 +255,10 @@ export async function transcribe(opts: {
   language?: string;
   summType?: string;
   diarization?: 0 | 1;
-  start?: boolean; // PATCH the tranConfig to kick off a fresh job (default true)
+  start?: boolean; // kick off the job (POST transsumm is_reload:1) (default true)
   save?: boolean; // PATCH results back to the cloud (default true)
   write?: boolean; // write a markdown file locally (default true)
+  wait?: boolean; // poll for the result; if false, just trigger and return (default true)
   requireSummary?: boolean; // keep polling until the AI summary lands too (default true)
   timeoutMs?: number;
   onTick?: (r: TranssummResult, elapsedMs: number) => void;
@@ -286,11 +287,46 @@ export async function transcribe(opts: {
     await startTranscription(opts.fileId, token, config.apiDomain, cfg);
   }
 
+  // Metadata-only render (title/date) for the early-return / failed paths.
+  const meta = renderMarkdown(detail);
+
+  // Trigger-only mode: fire the job and return without blocking. Plaud
+  // generates server-side and persists it (flags flip on their own); pull the
+  // markdown later with `transcribe <id> --no-start` or `sync`.
+  if (opts.wait === false) {
+    return {
+      fileId: meta.fileId,
+      title: meta.title,
+      date: meta.date,
+      status: 0,
+      msg: "triggered (processing)",
+      segments: 0,
+      hasSummary: false,
+      path: null,
+      savedToCloud: false,
+    };
+  }
+
   const result = await waitForTranscription(opts.fileId, token, config.apiDomain, cfg, {
     timeoutMs: opts.timeoutMs,
     requireSummary: opts.requireSummary,
     onTick: opts.onTick,
   });
+
+  // Terminal failure (empty/too-short recording): nothing to write or save.
+  if (result.failed) {
+    return {
+      fileId: meta.fileId,
+      title: meta.title,
+      date: meta.date,
+      status: result.status,
+      msg: result.failReason || result.msg,
+      segments: 0,
+      hasSummary: false,
+      path: null,
+      savedToCloud: false,
+    };
+  }
 
   const summary = normalizeSummary(result.data_result_summ);
   const merged: Record<string, unknown> = {
@@ -354,6 +390,7 @@ export async function transcribeAll(opts: {
   limit?: number;
   dryRun?: boolean;
   save?: boolean;
+  triggerOnly?: boolean; // fire each job and return without waiting (Plaud processes in parallel)
   onItem?: (item: TranscribeAllItem, index: number, total: number) => void;
 } = {}): Promise<TranscribeAllResult> {
   const token = requireToken();
@@ -403,6 +440,7 @@ export async function transcribeAll(opts: {
         language: opts.language,
         summType: opts.summType,
         save: opts.save,
+        wait: opts.triggerOnly ? false : undefined,
       });
       result.processed.push(r);
     } catch (e) {

@@ -165,10 +165,18 @@ export async function runServer(): Promise<void> {
           .boolean()
           .optional()
           .describe("Persist results back to the Plaud cloud (default true)."),
+        triggerOnly: z
+          .boolean()
+          .optional()
+          .describe(
+            "Fire every job without waiting for completion (Plaud processes them " +
+              "in parallel server-side). Much faster for many/long recordings; pull " +
+              "the markdown later with plaud_transcribe (start:false) or plaud_sync.",
+          ),
       },
     },
-    async ({ language, summType, limit, dryRun, save }) => {
-      const r = await transcribeAll({ language, summType, limit, dryRun, save });
+    async ({ language, summType, limit, dryRun, save, triggerOnly }) => {
+      const r = await transcribeAll({ language, summType, limit, dryRun, save, triggerOnly });
       const lines: string[] = [];
       if (r.dryRun) {
         lines.push(`${r.candidates.length} recording(s) would be transcribed:`);

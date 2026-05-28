@@ -154,6 +154,8 @@ export async function startTranscription(
 export type TranssummResult = {
   complete: boolean; // transcript is ready
   summaryReady: boolean; // AI summary is ready
+  failed: boolean; // terminal failure (e.g. empty/too-short recording)
+  failReason: string;
   status: number;
   msg: string;
   data_result?: unknown;
@@ -201,9 +203,17 @@ export async function getTranssumm(
   // and only flips to 1 once the summary lands — so don't gate completion on it.
   const hasResult = Array.isArray(raw.data_result) && raw.data_result.length > 0;
   const complete = hasResult;
+  // Terminal failures: status -7 / "transcript empty" (no speech / too short),
+  // or any non-processing error message with no result. Don't poll these to
+  // the timeout — they will never produce content.
+  const failed =
+    !hasResult &&
+    (status === -7 || (/empty|fail|error|invalid/i.test(msg) && msg !== "task processing"));
   return {
     complete,
     summaryReady: summaryIsReady(raw.data_result_summ),
+    failed,
+    failReason: failed ? `${msg || "failed"} (status ${status})` : "",
     status,
     msg,
     data_result: raw.data_result,
@@ -243,6 +253,7 @@ export async function waitForTranscription(
   while (Date.now() - start < timeoutMs) {
     last = await getTranssumm(fileId, token, apiDomain, cfg);
     opts.onTick?.(last, Date.now() - start);
+    if (last.failed) return last; // terminal: empty/failed recording, won't progress
     if (last.complete && (!requireSummary || last.summaryReady)) return last;
     await new Promise((r) => setTimeout(r, intervalMs));
   }
